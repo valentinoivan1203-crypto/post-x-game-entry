@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STAR CATCHER</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0b1026; font-family: "Segoe UI", Arial, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  #wrap { width: 480px; max-width: 96vw; }
+  #hud { display: flex; justify-content: space-between; align-items: center; color: #fff; padding: 10px 4px; font-size: 20px; font-weight: bold; }
+  #hud .stars { color: #ffd23f; }
+  #hud .lives { color: #ff6b6b; letter-spacing: 2px; }
+  #hud .time { color: #7dd3fc; }
+  canvas { display: block; width: 100%; background: linear-gradient(#141b3d, #1e2a5e); border: 3px solid #2b3a7a; border-radius: 10px; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #fff; background: rgba(8, 12, 34, 0.82); border-radius: 10px; }
+  #stage { position: relative; }
+  #overlay h1 { font-size: 44px; letter-spacing: 3px; color: #ffd23f; text-shadow: 0 3px 0 #b8860b; }
+  #overlay p { font-size: 18px; margin: 12px 0; line-height: 1.5; color: #e2e8f0; }
+  #overlay .big { font-size: 26px; color: #ffd23f; font-weight: bold; }
+  button { margin-top: 14px; padding: 12px 28px; font-size: 20px; font-weight: bold; color: #1a1207; background: #ffd23f; border: none; border-radius: 999px; cursor: pointer; }
+  button:hover { background: #ffe066; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span class="stars">★ <span id="score">0</span></span>
+    <span class="lives" id="lives">♥♥♥</span>
+    <span class="time">⏱ <span id="time">60</span>s</span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="480" height="560"></canvas>
+    <div id="overlay">
+      <h1>★ STAR CATCHER ★</h1>
+      <p>Move the basket with <b>← →</b> arrow keys or your mouse.<br>
+      Catch golden stars: <b>+10 points</b>.<br>
+      Dodge the grey rocks — a rock costs <b>1 life</b>.<br>
+      You have 3 lives and 60 seconds!</p>
+      <button id="startBtn">▶ PLAY</button>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var timeEl = document.getElementById('time');
+  var overlay = document.getElementById('overlay');
+  var startBtn = document.getElementById('startBtn');
+
+  var basket = { x: W / 2 - 45, y: H - 46, w: 90, h: 26, speed: 7 };
+  var items = [];
+  var score = 0, lives = 3, timeLeft = 60;
+  var running = false, over = false;
+  var keys = {};
+  var mouseX = null;
+  var spawnTimer = 0, clockTimer = 0, last = 0;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function spawnItem() {
+    var isStar = Math.random() < 0.62;
+    items.push({
+      kind: isStar ? 'star' : 'rock',
+      x: rand(18, W - 18),
+      y: -20,
+      r: isStar ? 13 : 15,
+      vy: rand(2.2, 3.8),
+      rot: rand(0, Math.PI * 2),
+      vr: rand(-0.05, 0.05)
+    });
+  }
+
+  function drawStar(x, y, r, rot) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.fillStyle = '#ffd23f';
+    ctx.strokeStyle = '#b8860b';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var rad = i % 2 === 0 ? r : r * 0.45;
+      var a = (Math.PI / 5) * i - Math.PI / 2;
+      var px = Math.cos(a) * rad, py = Math.sin(a) * rad;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawRock(x, y, r, rot) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.fillStyle = '#8d99ae';
+    ctx.strokeStyle = '#5c677d';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-r, -r * 0.4);
+    ctx.lineTo(-r * 0.3, -r);
+    ctx.lineTo(r * 0.7, -r * 0.6);
+    ctx.lineTo(r, r * 0.3);
+    ctx.lineTo(r * 0.4, r);
+    ctx.lineTo(-r * 0.6, r * 0.7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawBasket() {
+    ctx.fillStyle = '#f97316';
+    ctx.strokeStyle = '#9a3412';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(basket.x, basket.y);
+    ctx.lineTo(basket.x + basket.w, basket.y);
+    ctx.lineTo(basket.x + basket.w - 10, basket.y + basket.h);
+    ctx.lineTo(basket.x + 10, basket.y + basket.h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fdba74';
+    ctx.fillRect(basket.x + 6, basket.y + 4, basket.w - 12, 4);
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#141b3d';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffffff';
+    for (var i = 0; i < 40; i++) {
+      var sx = (i * 97) % W, sy = (i * 61) % H;
+      ctx.globalAlpha = 0.25 + ((i * 13) % 10) / 20;
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function update(dt) {
+    if (keys['ArrowLeft'] || keys['a']) basket.x -= basket.speed;
+    if (keys['ArrowRight'] || keys['d']) basket.x += basket.speed;
+    if (mouseX !== null) basket.x = mouseX - basket.w / 2;
+    if (basket.x < 0) basket.x = 0;
+    if (basket.x > W - basket.w) basket.x = W - basket.w;
+
+    spawnTimer += dt;
+    if (spawnTimer > 650) { spawnItem(); spawnTimer = 0; }
+
+    clockTimer += dt;
+    if (clockTimer >= 1000) {
+      timeLeft -= 1;
+      timeEl.textContent = timeLeft;
+      clockTimer = 0;
+      if (timeLeft <= 0) { endGame(); return; }
+    }
+
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      it.y += it.vy;
+      it.rot += it.vr;
+      if (it.y - it.r > H) { items.splice(i, 1); continue; }
+      var cx = it.x, cy = it.y;
+      if (cy + it.r >= basket.y && cy - it.r <= basket.y + basket.h &&
+          cx >= basket.x - 6 && cx <= basket.x + basket.w + 6) {
+        if (it.kind === 'star') {
+          score += 10;
+          scoreEl.textContent = score;
+        } else {
+          lives -= 1;
+          livesEl.textContent = '♥'.repeat(Math.max(lives, 0)) + '♡'.repeat(Math.max(3 - lives, 0));
+          if (lives <= 0) { items.splice(i, 1); endGame(); return; }
+        }
+        items.splice(i, 1);
+      }
+    }
+  }
+
+  function render() {
+    drawBackground();
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind === 'star') drawStar(it.x, it.y, it.r, it.rot);
+      else drawRock(it.x, it.y, it.r, it.rot);
+    }
+    drawBasket();
+  }
+
+  function loop(ts) {
+    if (!running) return;
+    var dt = ts - last;
+    last = ts;
+    update(dt);
+    render();
+    if (running) requestAnimationFrame(loop);
+  }
+
+  function reset() {
+    items = [];
+    score = 0; lives = 3; timeLeft = 60;
+    scoreEl.textContent = '0';
+    livesEl.textContent = '♥♥♥';
+    timeEl.textContent = '60';
+    basket.x = W / 2 - basket.w / 2;
+    spawnTimer = 0; clockTimer = 0;
+  }
+
+  function startGame() {
+    reset();
+    overlay.classList.add('hidden');
+    running = true; over = false;
+    last = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function endGame() {
+    running = false; over = true;
+    overlay.innerHTML = '<h1>★ GAME OVER ★</h1>' +
+      '<p>Time up or out of lives!</p>' +
+      '<p class="big">Final score: ' + score + '</p>' +
+      '<button id="againBtn">↻ PLAY AGAIN</button>';
+    overlay.classList.remove('hidden');
+    document.getElementById('againBtn').addEventListener('click', startGame);
+  }
+
+  window.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') e.preventDefault();
+  });
+  window.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    mouseX = (e.clientX - rect.left) * (W / rect.width);
+  });
+  canvas.addEventListener('touchmove', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    mouseX = (e.touches[0].clientX - rect.left) * (W / rect.width);
+    e.preventDefault();
+  }, { passive: false });
+  startBtn.addEventListener('click', startGame);
+
+  drawBackground();
+  drawBasket();
+})();
+</script>
+</body>
+</html>
